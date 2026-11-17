@@ -11,9 +11,16 @@ provider "aws" {
 }
 
 locals {
-  github_org  = "KTCloudElderberry"
-  github_repo = "elderberry-aws"
+  github_org     = "KTCloudElderberry"
+  github_org_id  = "352769296"
+  github_repo    = "elderberry-aws"
+  github_repo_id = "1461894678"
 
+  # GitHub OIDC sub 접두사 (2026-07-15 이후 만든 저장소는 ID가 들어간 immutable 형식)
+  # 확인 명령: gh api repos/KTCloudElderberry/elderberry-aws/actions/oidc/customization/sub
+  github_sub_prefix = "repo:${local.github_org}@${local.github_org_id}/${local.github_repo}@${local.github_repo_id}"
+
+  # bootstrap에서 만든 상태 버킷 이름 (계정 ID를 코드에 직접 쓰지 않으려고 계산)
   tfstate_bucket = "elderberry-tfstate-${data.aws_caller_identity.current.account_id}"
 }
 
@@ -48,8 +55,8 @@ data "aws_iam_policy_document" "gha_plan_trust" {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:${local.github_org}/${local.github_repo}:ref:refs/heads/main",
-        "repo:${local.github_org}/${local.github_repo}:pull_request",
+        "${local.github_sub_prefix}:ref:refs/heads/main",
+        "${local.github_sub_prefix}:pull_request",
       ]
     }
   }
