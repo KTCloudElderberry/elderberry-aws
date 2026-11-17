@@ -1,0 +1,75 @@
+name: terraform-plan
+
+# ── 언제 실행할까 ──
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "global/**"
+      - "daily/**"
+      - ".github/workflows/terraform-plan.yml"
+  push:
+    branches: [main]
+    paths:
+      - "global/**"
+      - "daily/**"
+      - ".github/workflows/terraform-plan.yml"
+  workflow_dispatch: # Actions 화면에서 버튼으로 직접 실행
+
+# ── 로봇에게 줄 GitHub 권한 ──
+permissions:
+  id-token: write # OIDC 출입증(토큰) 발급받기
+  contents: read  # 코드 읽기만
+
+# ── 같은 브랜치에서 새로 실행되면 이전 실행은 취소 ──
+concurrency:
+  group: terraform-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    name: plan (${{ matrix.layer }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        layer: [global] # daily 코드가 생기면 [global, daily]로 바꿈
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.layer }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: ap-northeast-2
+          role-session-name: gha-plan-${{ github.run_id }}
+
+      - name: Mask AWS account ID in logs
+        run: echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: terraform init
+        run: terraform init -input=false -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+
+      - name: terraform validate
+        run: terraform validate -no-color
+
+      - name: terraform plan
+        run: terraform plan -input=false -no-color -lock-timeout=60s
