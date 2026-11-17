@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        layer: [global] # daily 코드가 생기면 [global, daily]로 바꿈
+        layer: [global, daily]
 
     defaults:
       run:
