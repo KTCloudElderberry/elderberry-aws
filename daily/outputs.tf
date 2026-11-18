@@ -12,3 +12,8 @@ output "public_subnet_ids" {
   description = "퍼블릭 서브넷 ID (NAT·ALB용)"
   value       = module.vpc.public_subnets
 }
+
+output "tailscale_router_instance_id" {
+  description = "Tailscale 라우터 EC2 ID (Session Manager 접속용)"
+  value       = aws_instance.tailscale_router.id
+}
