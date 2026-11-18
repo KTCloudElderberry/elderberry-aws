@@ -25,6 +25,6 @@ fi
 tailscale up \
   --auth-key="$AUTHKEY" \
   --hostname="${hostname}" \
-  --advertise-tags=tag:aws-router \
+  --advertise-tags=tag:aws \
   --advertise-routes="${vpc_cidr}" \
   --accept-routes
