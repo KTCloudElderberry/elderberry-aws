@@ -17,3 +17,8 @@ output "tailscale_router_instance_id" {
   description = "Tailscale 라우터 EC2 ID (Session Manager 접속용)"
   value       = aws_instance.tailscale_router.id
 }
+
+output "eks_cluster_name" {
+  description = "EKS 클러스터 이름 (kubeconfig 설정용)"
+  value       = module.eks.cluster_name
+}

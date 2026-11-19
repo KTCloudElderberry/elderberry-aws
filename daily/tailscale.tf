@@ -1,7 +1,7 @@
 variable "tailscale_remote_cidrs" {
-  description = "AWS에서 Tailscale 라우터를 거쳐 보낼 원격 사이트 대역. 대역이 정해지면 추가"
+  description = "AWS에서 Tailscale 라우터를 거쳐 보낼 원격 대역. 100.64.0.0/10 = tailnet 기기 주소 (KT Monitoring 등)"
   type        = list(string)
-  default     = []
+  default     = ["100.64.0.0/10"]
 }
 
 locals {
@@ -113,12 +113,18 @@ resource "aws_instance" "tailscale_router" {
   }
 }
 
-# ── VPC 경로: 원격 대역은 라우터로 보내기 (대역이 정해지면 생김) ──
-# single_nat_gateway = true 라서 프라이빗 라우팅 테이블은 1개
+# ── VPC 경로: 원격 대역은 라우터로 보내기 ──
+# 프라이빗 라우팅 테이블이 AZ마다 하나씩 있으므로 (AZ 수 × 대역 수)만큼 경로 생성
 resource "aws_route" "to_remote_sites" {
-  for_each = toset(var.tailscale_remote_cidrs)
+  for_each = {
+    for pair in setproduct(range(length(local.azs)), var.tailscale_remote_cidrs) :
+    "${local.azs[pair[0]]}_${pair[1]}" => {
+      rt_index = pair[0]
+      cidr     = pair[1]
+    }
+  }
 
-  route_table_id         = module.vpc.private_route_table_ids[0]
-  destination_cidr_block = each.value
+  route_table_id         = module.vpc.private_route_table_ids[each.value.rt_index]
+  destination_cidr_block = each.value.cidr
   network_interface_id   = aws_instance.tailscale_router.primary_network_interface_id
 }

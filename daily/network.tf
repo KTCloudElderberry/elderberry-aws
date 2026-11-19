@@ -9,8 +9,10 @@ module "vpc" {
   private_subnets = ["10.10.0.0/20", "10.10.16.0/20"]
   public_subnets  = ["10.10.128.0/24", "10.10.129.0/24"]
 
-  enable_nat_gateway = true
-  single_nat_gateway = true
+  # NAT Gateway는 AZ마다 하나씩 (AZ 대칭, AZ 장애 시에도 새 Pod 기동 가능)
+  enable_nat_gateway     = true
+  single_nat_gateway     = false
+  one_nat_gateway_per_az = true
 
   public_subnet_tags = {
     "kubernetes.io/role/elb" = "1"
