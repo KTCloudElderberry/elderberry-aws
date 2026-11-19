@@ -34,6 +34,9 @@ jobs:
     name: plan (${{ matrix.layer }})
     runs-on: ubuntu-latest
 
+    env:
+      TF_VAR_eks_public_access_cidrs: ${{ secrets.EKS_PUBLIC_ACCESS_CIDRS }}
+      
     strategy:
       fail-fast: false
       matrix:
