@@ -40,7 +40,7 @@ module "eks" {
 
   eks_managed_node_groups = {
     default = {
-      instance_types = ["c7i-flex.large"]
+      instance_types = ["m7i-flex.large"]
       ami_type       = "AL2023_x86_64_STANDARD"
 
       min_size     = 2
