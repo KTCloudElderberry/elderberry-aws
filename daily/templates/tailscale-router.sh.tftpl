@@ -13,6 +13,11 @@ sysctl -p /etc/sysctl.d/99-tailscale.conf
 curl -fsSL https://tailscale.com/install.sh | sh
 systemctl enable --now tailscaled
 
+# 2-1) UDP GRO 설정: 서브넷 라우터의 터널 처리 성능 개선 (Tailscale 권장)
+dnf install -y ethtool
+NETDEV=$(ip -o route get 8.8.8.8 | cut -f 5 -d " ")
+ethtool -K "$NETDEV" rx-udp-gro-forwarding on rx-gro-list off
+
 # 3) 인증 키 읽기: 서버 자신의 IAM 역할로 Parameter Store에서 꺼냄
 AUTHKEY=$(aws ssm get-parameter --region "${region}" --name "${authkey_param}" --with-decryption --query Parameter.Value --output text)
 

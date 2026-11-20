@@ -7,6 +7,14 @@ variable "tailscale_remote_cidrs" {
 locals {
   tailscale_name          = "${local.name}-tailscale-router"
   tailscale_authkey_param = "/elderberry/tailscale/authkey"
+
+  # 라우터를 AZ마다 1대씩. 키는 AZ 이름의 끝 글자 (a, c)
+  tailscale_routers = {
+    for i, az in local.azs : substr(az, -1, 1) => {
+      az_index  = i
+      subnet_id = module.vpc.public_subnets[i]
+    }
+  }
 }
 
 data "aws_caller_identity" "current" {}
@@ -81,11 +89,13 @@ resource "aws_iam_instance_profile" "tailscale_router" {
   role = aws_iam_role.tailscale_router.name
 }
 
-# ── EC2: Tailscale 서브넷 라우터 ──
+# ── EC2: Tailscale 서브넷 라우터 (AZ마다 1대) ──
 resource "aws_instance" "tailscale_router" {
+  for_each = local.tailscale_routers
+
   ami                         = data.aws_ssm_parameter.al2023_arm64.insecure_value
   instance_type               = "t4g.micro"
-  subnet_id                   = module.vpc.public_subnets[0]
+  subnet_id                   = each.value.subnet_id
   vpc_security_group_ids      = [aws_security_group.tailscale_router.id]
   iam_instance_profile        = aws_iam_instance_profile.tailscale_router.name
   associate_public_ip_address = true
@@ -103,28 +113,28 @@ resource "aws_instance" "tailscale_router" {
   user_data = replace(templatefile("${path.module}/templates/tailscale-router.sh.tftpl", {
     region        = "ap-northeast-2"
     authkey_param = local.tailscale_authkey_param
-    hostname      = "aws-router"
+    hostname      = "aws-router-${each.key}"
     vpc_cidr      = module.vpc.vpc_cidr_block
   }), "\r", "")
   user_data_replace_on_change = true
 
   tags = {
-    Name = local.tailscale_name
+    Name = "${local.tailscale_name}-${each.key}"
   }
 }
 
-# ── VPC 경로: 원격 대역은 라우터로 보내기 ──
-# 프라이빗 라우팅 테이블이 AZ마다 하나씩 있으므로 (AZ 수 × 대역 수)만큼 경로 생성
+# ── VPC 경로: 원격 대역은 같은 AZ의 라우터로 보내기 ──
+# 프라이빗 라우팅 테이블이 AZ마다 하나씩 있으므로 (라우터 수 × 대역 수)만큼 경로 생성
 resource "aws_route" "to_remote_sites" {
   for_each = {
-    for pair in setproduct(range(length(local.azs)), var.tailscale_remote_cidrs) :
-    "${local.azs[pair[0]]}_${pair[1]}" => {
-      rt_index = pair[0]
-      cidr     = pair[1]
+    for pair in setproduct(keys(local.tailscale_routers), var.tailscale_remote_cidrs) :
+    "${pair[0]}_${pair[1]}" => {
+      router = pair[0]
+      cidr   = pair[1]
     }
   }
 
-  route_table_id         = module.vpc.private_route_table_ids[each.value.rt_index]
+  route_table_id         = module.vpc.private_route_table_ids[local.tailscale_routers[each.value.router].az_index]
   destination_cidr_block = each.value.cidr
-  network_interface_id   = aws_instance.tailscale_router.primary_network_interface_id
+  network_interface_id   = aws_instance.tailscale_router[each.value.router].primary_network_interface_id
 }
