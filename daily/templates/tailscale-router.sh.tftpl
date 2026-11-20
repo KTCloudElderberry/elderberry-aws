@@ -18,6 +18,15 @@ dnf install -y ethtool
 NETDEV=$(ip -o route get 8.8.8.8 | cut -f 5 -d " ")
 ethtool -K "$NETDEV" rx-udp-gro-forwarding on rx-gro-list off
 
+# 2-2) 라우터 2대(HA)용 경로 설정
+#  - VPC에서 tailnet으로 나가는 패킷은 출발지를 이 라우터의 tailnet 주소로 바꿈
+#    (대기 라우터는 VPC 대역 출발지로 보낼 수 없어서, 바꾸지 않으면 상대가 버림)
+#  - VPC 대역으로 가는 패킷은 Tailscale 경로표(52) 대신 일반 경로표로 보냄
+#    (--accept-routes로 받은 다른 라우터의 VPC 광고 때문에 응답이 터널로 새는 것 방지)
+dnf install -y iptables-nft
+iptables -t nat -A POSTROUTING -s "${vpc_cidr}" -o tailscale0 -j MASQUERADE
+ip rule add to "${vpc_cidr}" lookup main priority 2500
+
 # 3) 인증 키 읽기: 서버 자신의 IAM 역할로 Parameter Store에서 꺼냄
 AUTHKEY=$(aws ssm get-parameter --region "${region}" --name "${authkey_param}" --with-decryption --query Parameter.Value --output text)
 
