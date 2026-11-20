@@ -13,9 +13,9 @@ output "public_subnet_ids" {
   value       = module.vpc.public_subnets
 }
 
-output "tailscale_router_instance_id" {
-  description = "Tailscale 라우터 EC2 ID (Session Manager 접속용)"
-  value       = aws_instance.tailscale_router.id
+output "tailscale_router_instance_ids" {
+  description = "Tailscale 라우터 EC2 ID, AZ별 (Session Manager 접속용)"
+  value       = { for k, r in aws_instance.tailscale_router : k => r.id }
 }
 
 output "eks_cluster_name" {
