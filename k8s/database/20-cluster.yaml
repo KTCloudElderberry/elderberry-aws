@@ -1,0 +1,47 @@
+# 쿠폰 앱 DB: PostgreSQL 2개 (AZ a·c에 1개씩)
+# 이름은 Terraform cnpg.tf의 cnpg_cluster_name과 같아야 해요 (서비스 계정 = 클러스터 이름)
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: coupon-db
+  namespace: database
+spec:
+  instances: 2                         # Primary 1 + Replica 1
+
+  # 처음 만들 때 쿠폰 앱용 DB와 사용자를 함께 만듦
+  bootstrap:
+    initdb:
+      database: coupon
+      owner: coupon
+
+  storage:
+    storageClass: gp3-encrypted
+    size: 5Gi
+
+  # 두 인스턴스를 반드시 다른 AZ에 배치
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: topology.kubernetes.io/zone
+    podAntiAffinityType: required
+
+  # 동기 복제: Replica 1개가 받았다고 확인해야 커밋 완료
+  # preferred = Replica가 없을 때는 기다리지 않고 계속 동작 (가용성 우선)
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: preferred
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  # WAL을 Barman 플러그인으로 S3에 보관
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: coupon-db-store

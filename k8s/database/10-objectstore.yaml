@@ -1,0 +1,15 @@
+# 백업(WAL·베이스 백업)을 보낼 S3 위치
+# BACKUP_BUCKET은 적용할 때 실제 버킷 이름으로 바꿔요 (공개 저장소라 계정 ID를 적지 않음)
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: coupon-db-store
+  namespace: database
+spec:
+  retentionPolicy: "7d"               # 7일 지난 백업은 자동 정리
+  configuration:
+    destinationPath: s3://BACKUP_BUCKET/aws/
+    s3Credentials:
+      inheritFromIAMRole: true        # 키 대신 Pod에 연결된 IAM 권한(Pod Identity) 사용
+    wal:
+      compression: gzip
