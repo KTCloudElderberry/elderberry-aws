@@ -33,6 +33,14 @@ module "eks" {
     }
     kube-proxy = {}
     coredns    = {}
+
+    # EBS 디스크를 PVC로 만들어 주는 드라이버 (CNPG DB 저장소)
+    aws-ebs-csi-driver = {
+      pod_identity_association = [{
+        role_arn        = module.ebs_csi_pod_identity.iam_role_arn
+        service_account = "ebs-csi-controller-sa"
+      }]
+    }
   }
 
   vpc_id     = module.vpc.vpc_id
@@ -65,4 +73,14 @@ module "aws_lb_controller_pod_identity" {
       service_account = "aws-load-balancer-controller"
     }
   }
+}
+
+# ── EBS CSI 드라이버가 쓸 IAM 권한 (Pod Identity) ──
+# 연결(association)은 위 addons의 aws-ebs-csi-driver에서 만들어요
+module "ebs_csi_pod_identity" {
+  source  = "terraform-aws-modules/eks-pod-identity/aws"
+  version = "2.11.0"
+
+  name                      = "${local.name}-ebs-csi"
+  attach_aws_ebs_csi_policy = true
 }
