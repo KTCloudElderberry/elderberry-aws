@@ -4,6 +4,11 @@ variable "eks_public_access_cidrs" {
   description = "EKS API 공개 엔드포인트 허용 대역"
   type        = list(string)
 }
+# ── 클러스터 관리자 (내 IAM 사용자) ──
+# 계정 ID는 코드에 적지 않고 조회해서 씀 (공개 저장소)
+locals {
+  cluster_admin_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/elderberry-taehyeon-admin"
+}
 
 # ── EKS 클러스터 + 노드 그룹 ──
 module "eks" {
@@ -20,8 +25,26 @@ module "eks" {
   endpoint_public_access       = true
   endpoint_public_access_cidrs = var.eks_public_access_cidrs
 
-  # terraform을 실행한 IAM 사용자를 클러스터 관리자로 등록 (액세스 엔트리)
-  enable_cluster_creator_admin_permissions = true
+  # 클러스터 관리자를 "실행한 주체" 대신 내 IAM 사용자로 직접 지정
+  # (GitHub Actions에서 plan할 때 관리자가 plan 역할로 바뀌는 차이를 없앰)
+  # 키 이름을 cluster_creator / admin으로 두어, 기존 등록과 같은 리소스로 인식되게 함
+  enable_cluster_creator_admin_permissions = false
+  access_entries = {
+    cluster_creator = {
+      principal_arn = local.cluster_admin_arn
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
+
+  # EKS 비밀 암호화 키(KMS)의 관리자도 같은 사용자로 고정
+  kms_key_administrators = [local.cluster_admin_arn]
 
   # EKS 관리형 애드온
   addons = {
