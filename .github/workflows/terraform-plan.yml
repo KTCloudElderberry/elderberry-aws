@@ -77,5 +77,4 @@ jobs:
       - name: terraform plan
         run: terraform plan -input=false -no-color -lock-timeout=60s
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}        env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
