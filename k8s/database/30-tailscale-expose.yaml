@@ -1,0 +1,21 @@
+# 온프렘 Replica가 접속할 AWS DB 주소 (Tailscale 오퍼레이터 프록시)
+# - 항상 현재 Primary로 연결 (coupon-db-rw와 같은 selector)
+# - tailnet에 aws-coupon-db 기기로 등록되고, tag:k8s가 붙음
+apiVersion: v1
+kind: Service
+metadata:
+  name: coupon-db-tailscale
+  namespace: database
+  annotations:
+    tailscale.com/hostname: aws-coupon-db
+spec:
+  type: LoadBalancer
+  loadBalancerClass: tailscale
+  selector:
+    cnpg.io/cluster: coupon-db
+    cnpg.io/instanceRole: primary
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
