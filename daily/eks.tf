@@ -51,7 +51,9 @@ module "eks" {
       instance_types = ["m7i-flex.large"]
       ami_type       = "AL2023_x86_64_STANDARD"
 
-      min_size     = 2
+      # 밤에는 scripts/night-stop.sh가 desired를 0으로 내림 (WBS 3.11)
+      # desired_size는 모듈이 apply 때 무시하므로 스크립트로 바꿔도 되돌아가지 않음
+      min_size     = 0
       max_size     = 2
       desired_size = 2
     }
