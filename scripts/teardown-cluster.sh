@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 매일 저녁 daily/ destroy 전에 실행: Terraform이 모르는 AWS 리소스(EBS)를 먼저 정리
+# daily/ destroy 전에 실행: Terraform이 모르는 리소스(Tailscale 기기, EBS)를 먼저 정리
+# 평소 밤에는 night-stop.sh만 사용 (이 스크립트는 destroy할 때만)
 set -euo pipefail
 
 CLUSTER_NAME="elderberry-eks"
@@ -8,7 +9,9 @@ REGION="ap-northeast-2"
 echo "[1/3] kubeconfig 갱신"
 aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION"
 
-echo "[2/3] DB 클러스터와 디스크 요청(PVC) 삭제 → EBS CSI가 EBS를 지움"
+echo "[2/3] Tailscale 입구 → DB 클러스터 → 디스크 요청(PVC) 순서로 삭제"
+# 오퍼레이터가 Tailnet의 aws-coupon-db 기기를 지울 때까지 기다림 (Service의 finalizer)
+kubectl delete svc coupon-db-tailscale -n database --ignore-not-found --wait=true
 kubectl delete cluster coupon-db -n database --ignore-not-found --wait=true
 kubectl delete pvc -n database --all --wait=true
 

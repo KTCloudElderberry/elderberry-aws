@@ -7,6 +7,7 @@ metadata:
   namespace: database
 spec:
   instances: 2                         # Primary 1 + Replica 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.7-system-trixie   # 온프렘 replica와 같은 이미지
 
   # 처음 만들 때 쿠폰 앱용 DB와 사용자를 함께 만듦
   bootstrap:
