@@ -9,7 +9,9 @@ REGION="ap-northeast-2"
 echo "[1/3] kubeconfig 갱신"
 aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION"
 
-echo "[2/3] Tailscale 입구 → DB 클러스터 → 디스크 요청(PVC) 순서로 삭제"
+echo "[2/3] ALB → Tailscale 입구 → DB 클러스터 → 디스크 요청(PVC) 순서로 삭제"
+# LBC가 ALB·보안 그룹을 지울 때까지 기다림 (남기면 VPC destroy 실패 + 요금 계속)
+kubectl delete ingress coupon -n coupon --ignore-not-found --wait=true
 # 오퍼레이터가 Tailnet의 aws-coupon-db 기기를 지울 때까지 기다림 (Service의 finalizer)
 kubectl delete svc coupon-db-tailscale -n database --ignore-not-found --wait=true
 kubectl delete cluster coupon-db -n database --ignore-not-found --wait=true
