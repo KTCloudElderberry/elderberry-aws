@@ -104,7 +104,8 @@ helm upgrade --install kube-state-metrics prometheus-community/kube-state-metric
 kubectl apply -f "$REPO_DIR/k8s/monitoring/prometheus-agent.yaml"
 kubectl rollout status ds/prometheus-agent -n monitoring
 
-echo "[10/10] 쿠폰 앱 (Secret 2개 → 배포 → ALB → aws. DNS)"
+echo "[10/10] 쿠폰 앱 준비 (Secret 2개 → Argo CD 출입증 → Argo CD 배포 대기 → aws. DNS)"
+# 쿠폰 앱 자체는 KT Argo CD가 배포 (elderberry-gitops/argocd/coupon-aws.yaml). 여기서는 Git에 없는 것만 준비
 kubectl create namespace coupon --dry-run=client -o yaml | kubectl apply -f -
 # DB 접속 정보: database → coupon 네임스페이스로 매번 새로 복사 (DB를 다시 만들어 비밀번호가 바뀌어도 맞춰짐)
 kubectl create secret generic coupon-db-app -n coupon \
@@ -119,21 +120,61 @@ else
   kubectl create secret docker-registry ghcr-pull -n coupon \
     --docker-server=ghcr.io --docker-username="$GH_USER" --docker-password="$GHCR_TOKEN"
 fi
-# 팀 GitOps 저장소의 AWS overlay 그대로 배포 (Argo CD 도입 전)
-git -C "$GITOPS_DIR" pull --ff-only
-kubectl kustomize "$GITOPS_DIR/apps/coupon/overlays/aws" | kubectl apply -f -
-kubectl rollout status deploy/coupon -n coupon --timeout=5m
+# KT Argo CD 출입증 (읽기 전체, 쓰기 coupon만)
+kubectl apply -f "$REPO_DIR/k8s/argocd/eks-access.yaml"
 
-# LBC가 ALB를 만들 때까지 대기 (최대 5분)
+# 쿠폰 앱이 없으면 = 새 클러스터 → EKS 주소·CA·토큰이 바뀌어 Argo CD 등록을 다시 해야 함
+if kubectl get deploy coupon -n coupon >/dev/null 2>&1; then
+  echo "  쿠폰 앱 있음 → Argo CD 연결 정상, 등록 파일 생성 건너뜀"
+else
+  ARGO_TOKEN=""
+  for i in $(seq 1 12); do
+    ARGO_TOKEN=$(kubectl get secret argocd-manager-token -n kube-system -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
+    if [ -n "$ARGO_TOKEN" ]; then break; fi
+    sleep 5
+  done
+  EKS_SERVER=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" --query "cluster.endpoint" --output text)
+  EKS_CA=$(kubectl get secret argocd-manager-token -n kube-system -o jsonpath='{.data.ca\.crt}')
+  ARGO_FILE="$HOME/argocd-cluster-aws.yaml"
+  cat > "$ARGO_FILE" <<ARGOEOF
+# KT Argo CD에 EKS 클러스터 등록 (적용: kubectl apply -f argocd-cluster-aws.yaml -n argocd)
+# 토큰이 들어 있음: DM으로만 전달하고, 적용 후 파일 삭제
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cluster-aws
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: cluster
+type: Opaque
+stringData:
+  name: aws
+  server: ${EKS_SERVER}
+  config: |
+    {
+      "bearerToken": "${ARGO_TOKEN}",
+      "tlsClientConfig": {
+        "insecure": false,
+        "caData": "${EKS_CA}"
+      }
+    }
+ARGOEOF
+  chmod 600 "$ARGO_FILE"
+  unset ARGO_TOKEN EKS_CA
+  echo "  ★ 새 클러스터: $ARGO_FILE 을 경현님께 DM으로 전달하세요 (KT에서 kubectl apply -f ... -n argocd, 적용 후 삭제)"
+  echo "  ★ Argo CD가 쿠폰 앱을 배포할 때까지 아래에서 최대 20분 기다립니다"
+fi
+
+# Argo CD 배포 → LBC가 ALB 생성할 때까지 대기 (최대 20분)
 ALB_DNS=""
-for i in $(seq 1 30); do
+for i in $(seq 1 120); do
   ALB_DNS=$(kubectl get ingress coupon -n coupon -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
   if [ -n "$ALB_DNS" ]; then break; fi
-  echo "  ALB 주소 대기 중 ($i/30)"
+  if [ $((i % 6)) -eq 0 ]; then echo "  ALB 주소 대기 중 ($((i / 6))/20분)"; fi
   sleep 10
 done
 if [ -z "$ALB_DNS" ]; then
-  echo "오류: ALB 주소가 생기지 않았습니다. kubectl describe ingress coupon -n coupon 확인" >&2
+  echo "오류: 20분 안에 ALB가 생기지 않았습니다. Argo CD에서 coupon-aws 상태와 kubectl describe ingress coupon -n coupon 확인" >&2
   exit 1
 fi
 echo "  ALB: $ALB_DNS"
