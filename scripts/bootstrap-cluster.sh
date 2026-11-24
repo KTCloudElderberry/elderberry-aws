@@ -1,39 +1,49 @@
 #!/usr/bin/env bash
-# 클러스터를 새로 만든 뒤(destroy → apply) 실행: 클러스터 안의 구성 요소(DB 등)를 다시 설치
+# 클러스터를 새로 만든 뒤(destroy → apply) 실행: 클러스터 안의 구성 요소를 다시 설치
 # 평소 밤/아침에는 night-stop.sh / morning-start.sh만 사용 (이 스크립트는 필요 없음)
 # 이미 있는 것은 건너뜀 → 실수로 다시 실행해도 S3 백업과 DB가 안전
-# Tailscale 오퍼레이터가 없을 때만 OAuth 값이 필요 (Git·채팅에 붙이지 말 것):
-#   export TS_OAUTH_CLIENT_ID=...
-#   read -rs TS_OAUTH_CLIENT_SECRET && export TS_OAUTH_CLIENT_SECRET
+#
+# 필요한 환경변수 (해당 항목을 처음 만들 때만. Git·채팅에 붙이지 말 것, 입력: read -rs 변수 && export 변수)
+#   TS_OAUTH_CLIENT_ID, TS_OAUTH_CLIENT_SECRET  Tailscale 오퍼레이터
+#   GH_USER, GHCR_TOKEN                         쿠폰 앱 이미지(GHCR, read:packages) 내려받기
+#   CLOUDFLARE_API_TOKEN                        aws. DNS 레코드를 새 ALB 주소로 갱신 (없으면 확인만 건너뜀)
+# 쿠폰 앱 매니페스트는 팀 GitOps 저장소에서 읽음: GITOPS_DIR (기본 ~/projects/elderberry-gitops)
 set -euo pipefail
 
 CLUSTER_NAME="elderberry-eks"
 REGION="ap-northeast-2"
+DOMAIN="elderberry-coupon.com"
+GITOPS_DIR="${GITOPS_DIR:-$HOME/projects/elderberry-gitops}"
 
 # 버전 고정 (helm list -A의 CHART 번호)
 CERT_MANAGER_VERSION="v1.21.3"                # 2026-11-20 확인
 CNPG_CHART_VERSION="0.29.2"                   # CNPG 1.30.2
 BARMAN_PLUGIN_CHART_VERSION="0.9.0"           # 플러그인 v0.16.0
 TAILSCALE_OPERATOR_CHART_VERSION="1.104.7"    # 2026-11-23 확인
+LBC_CHART_VERSION="3.6.3"                     # 2026-11-24 확인
+NODE_EXPORTER_CHART_VERSION="6.0.0"           # 2026-11-23 확인
+KSM_CHART_VERSION="9.1.0"                     # 2026-11-23 확인
 
 # 이 스크립트가 어디서 실행돼도 저장소 기준 경로를 찾게 함
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "[1/7] kubeconfig 갱신"
+echo "[1/10] kubeconfig 갱신"
 aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$REGION"
 
-echo "[2/7] Helm 저장소 등록"
+echo "[2/10] Helm 저장소 등록"
 helm repo add jetstack https://charts.jetstack.io --force-update
 helm repo add cnpg https://cloudnative-pg.github.io/charts --force-update
 helm repo add tailscale https://pkgs.tailscale.com/helmcharts --force-update
+helm repo add eks https://aws.github.io/eks-charts --force-update
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
 
-echo "[3/7] cert-manager"
+echo "[3/10] cert-manager"
 helm upgrade --install cert-manager jetstack/cert-manager \
   --version "$CERT_MANAGER_VERSION" \
   --namespace cert-manager --create-namespace \
   --set crds.enabled=true --wait
 
-echo "[4/7] CNPG 오퍼레이터 + Barman Cloud 플러그인"
+echo "[4/10] CNPG 오퍼레이터 + Barman Cloud 플러그인"
 helm upgrade --install cnpg cnpg/cloudnative-pg \
   --version "$CNPG_CHART_VERSION" \
   --namespace cnpg-system --create-namespace --wait
@@ -42,7 +52,18 @@ helm upgrade --install plugin-barman-cloud cnpg/plugin-barman-cloud \
   --namespace cnpg-system --wait
 kubectl -n cnpg-system rollout status deploy/plugin-barman-cloud
 
-echo "[5/7] Tailscale 오퍼레이터 (이미 있으면 건너뜀)"
+echo "[5/10] AWS Load Balancer Controller (권한은 daily/eks.tf의 Pod Identity)"
+# 리전·VPC를 직접 지정 → 노드 메타데이터(IMDS) 조회에 의존하지 않음
+VPC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$REGION" --query "cluster.resourcesVpcConfig.vpcId" --output text)
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  --version "$LBC_CHART_VERSION" \
+  --namespace kube-system \
+  --set clusterName="$CLUSTER_NAME" \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region="$REGION" \
+  --set vpcId="$VPC_ID" --wait
+
+echo "[6/10] Tailscale 오퍼레이터 (이미 있으면 건너뜀)"
 if helm status tailscale-operator -n tailscale >/dev/null 2>&1; then
   echo "  이미 설치됨 → 건너뜀"
 else
@@ -56,7 +77,7 @@ else
     --wait
 fi
 
-echo "[6/7] DB 클러스터 (이미 있으면 건너뜀)"
+echo "[7/10] DB 클러스터 (이미 있으면 건너뜀)"
 if kubectl get cluster coupon-db -n database >/dev/null 2>&1; then
   echo "  coupon-db가 이미 있음 → S3 비우기와 DB 생성 건너뜀"
 else
@@ -71,8 +92,73 @@ else
 fi
 kubectl get cluster -n database coupon-db
 
-echo "[7/7] 온프렘이 DB에 닿는 Tailscale 입구"
+echo "[8/10] 온프렘이 DB에 닿는 Tailscale 입구"
 kubectl apply -f "$REPO_DIR/k8s/database/30-tailscale-expose.yaml"
 kubectl get svc -n database coupon-db-tailscale
+
+echo "[9/10] 모니터링 (node-exporter, kube-state-metrics, 노드별 Agent → kt)"
+helm upgrade --install node-exporter prometheus-community/prometheus-node-exporter \
+  --version "$NODE_EXPORTER_CHART_VERSION" --namespace monitoring --create-namespace --wait
+helm upgrade --install kube-state-metrics prometheus-community/kube-state-metrics \
+  --version "$KSM_CHART_VERSION" --namespace monitoring --wait
+kubectl apply -f "$REPO_DIR/k8s/monitoring/prometheus-agent.yaml"
+kubectl rollout status ds/prometheus-agent -n monitoring
+
+echo "[10/10] 쿠폰 앱 (Secret 2개 → 배포 → ALB → aws. DNS)"
+kubectl create namespace coupon --dry-run=client -o yaml | kubectl apply -f -
+# DB 접속 정보: database → coupon 네임스페이스로 매번 새로 복사 (DB를 다시 만들어 비밀번호가 바뀌어도 맞춰짐)
+kubectl create secret generic coupon-db-app -n coupon \
+  --from-literal=uri="$(kubectl get secret coupon-db-app -n database -o jsonpath='{.data.uri}' | base64 -d)" \
+  --dry-run=client -o yaml | kubectl apply -f -
+# GHCR 비공개 이미지 출입증 (이미 있으면 건너뜀)
+if kubectl get secret ghcr-pull -n coupon >/dev/null 2>&1; then
+  echo "  ghcr-pull 이미 있음 → 건너뜀"
+else
+  : "${GH_USER:?GH_USER(깃허브 아이디)를 먼저 export 하세요}"
+  : "${GHCR_TOKEN:?GHCR_TOKEN(read:packages)을 먼저 export 하세요}"
+  kubectl create secret docker-registry ghcr-pull -n coupon \
+    --docker-server=ghcr.io --docker-username="$GH_USER" --docker-password="$GHCR_TOKEN"
+fi
+# 팀 GitOps 저장소의 AWS overlay 그대로 배포 (Argo CD 도입 전)
+git -C "$GITOPS_DIR" pull --ff-only
+kubectl kustomize "$GITOPS_DIR/apps/coupon/overlays/aws" | kubectl apply -f -
+kubectl rollout status deploy/coupon -n coupon --timeout=5m
+
+# LBC가 ALB를 만들 때까지 대기 (최대 5분)
+ALB_DNS=""
+for i in $(seq 1 30); do
+  ALB_DNS=$(kubectl get ingress coupon -n coupon -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+  if [ -n "$ALB_DNS" ]; then break; fi
+  echo "  ALB 주소 대기 중 ($i/30)"
+  sleep 10
+done
+if [ -z "$ALB_DNS" ]; then
+  echo "오류: ALB 주소가 생기지 않았습니다. kubectl describe ingress coupon -n coupon 확인" >&2
+  exit 1
+fi
+echo "  ALB: $ALB_DNS"
+
+# aws. 레코드가 새 ALB를 가리키게 함 (메인 주소는 aws.를 가리키므로 따로 바꿀 필요 없음)
+if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+  echo "  CLOUDFLARE_API_TOKEN 없음 → DNS 확인 건너뜀. aws.$DOMAIN 이 위 ALB를 가리키는지 직접 확인하세요"
+else
+  CF_API="https://api.cloudflare.com/client/v4"
+  CF_AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+  ZONE_ID=$(curl -s "$CF_API/zones?name=$DOMAIN" -H "$CF_AUTH" | grep -o '"id":"[a-f0-9]\{32\}"' | head -1 | cut -d'"' -f4)
+  RECORD=$(curl -s "$CF_API/zones/$ZONE_ID/dns_records?type=CNAME&name=aws.$DOMAIN" -H "$CF_AUTH")
+  RECORD_ID=$(echo "$RECORD" | grep -o '"id":"[a-f0-9]\{32\}"' | head -1 | cut -d'"' -f4 || true)
+  CURRENT=$(echo "$RECORD" | grep -o '"content":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  if [ "$CURRENT" = "$ALB_DNS" ]; then
+    echo "  aws.$DOMAIN 이미 최신 → 건너뜀"
+  elif [ -n "$RECORD_ID" ]; then
+    curl -s -X PATCH "$CF_API/zones/$ZONE_ID/dns_records/$RECORD_ID" -H "$CF_AUTH" -H "Content-Type: application/json" \
+      --data "{\"content\":\"$ALB_DNS\"}" | grep -o '"success":[a-z]*'
+    echo "  aws.$DOMAIN → 새 ALB로 갱신"
+  else
+    curl -s -X POST "$CF_API/zones/$ZONE_ID/dns_records" -H "$CF_AUTH" -H "Content-Type: application/json" \
+      --data "{\"type\":\"CNAME\",\"name\":\"aws\",\"content\":\"$ALB_DNS\",\"proxied\":true,\"ttl\":1,\"comment\":\"B-7 AWS ALB (coupon)\"}" | grep -o '"success":[a-z]*'
+    echo "  aws.$DOMAIN 새로 생성"
+  fi
+fi
 
 echo "완료"
