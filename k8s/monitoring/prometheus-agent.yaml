@@ -1,9 +1,48 @@
-# AWS 지표를 kt cloud Prometheus로 보내는 Agent (노드마다 1개)
-# 채원님 알림 규칙: absent_over_time(up{env="aws"}[1m]) → env="aws" 라벨 필수
+# EKS Prometheus Agent — DaemonSet 방식 (설계: 김채원, 보안·검증 보완: 김태현)
+# 노드마다 Agent가 하나씩 뜨고, 각 Agent는 "자기 노드에 있는 Pod만" 수집해서 KT로 보낸다 (중복 방지)
+# 설정 파일에 노드 이름을 넣기 위해 Agent 시작 전에 initContainer가 설정을 만든다
+#   → ConfigMap을 고친 뒤에는 재시작 필요: kubectl rollout restart ds/prometheus-agent -n monitoring
+#
+# 수집 대상 (Pod 라벨 기준, 다르면 아래 ConfigMap의 label 값만 수정)
+#   쿠폰 앱            app=coupon                                       포트 이름 http
+#   kube-state-metrics app.kubernetes.io/name=kube-state-metrics        포트 이름 http
+#   node-exporter      app.kubernetes.io/name=prometheus-node-exporter  포트 이름 metrics
+#   CNPG               cnpg.io/podRole=instance                         포트 이름 metrics
+#
+# 적용: kubectl apply -f k8s/monitoring/prometheus-agent.yaml
+---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-agent
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-agent
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-agent
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-agent
+    namespace: monitoring
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -11,28 +50,104 @@ metadata:
   name: prometheus-agent-config
   namespace: monitoring
 data:
-  prometheus.yml: |
+  # __NODE_NAME__ 은 시작 시 실제 노드 이름으로 바뀐다
+  prometheus.yml.tmpl: |
     global:
       scrape_interval: 15s
       external_labels:
         env: aws
-        node: ${NODE_NAME}   # v3: 환경변수를 자동으로 치환
+        agent: __NODE_NAME__
 
     scrape_configs:
-      # Agent 자기 자신 → up{env="aws"} 생성 (AWSMetricsMissing 판단 기준)
+      # Agent 자기 자신 → up{env="aws"} (AWSMetricsMissing 판단 기준)
       - job_name: aws-agent
         static_configs:
-          - targets: ["localhost:9090"]
+          - targets: ['localhost:9090']
 
-    # kt cloud Prometheus (채원님, Tailscale 경유)
+      # 쿠폰 앱
+      - job_name: coupon
+        kubernetes_sd_configs:
+          - role: pod
+            selectors:
+              - role: pod
+                field: spec.nodeName=__NODE_NAME__
+                label: app=coupon
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: http
+            action: keep
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+
+      # Pod·Deployment 상태 (kube-state-metrics 자체 라벨에 node가 있으므로 node 라벨은 붙이지 않음)
+      - job_name: kube-state-metrics
+        honor_labels: true
+        kubernetes_sd_configs:
+          - role: pod
+            selectors:
+              - role: pod
+                field: spec.nodeName=__NODE_NAME__
+                label: app.kubernetes.io/name=kube-state-metrics
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: http
+            action: keep
+
+      # 노드 CPU·메모리·디스크
+      - job_name: node-exporter
+        kubernetes_sd_configs:
+          - role: pod
+            selectors:
+              - role: pod
+                field: spec.nodeName=__NODE_NAME__
+                label: app.kubernetes.io/name=prometheus-node-exporter
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+
+      # CNPG (PostgreSQL) — 복제 지연 등
+      - job_name: cnpg
+        kubernetes_sd_configs:
+          - role: pod
+            selectors:
+              - role: pod
+                field: spec.nodeName=__NODE_NAME__
+                label: cnpg.io/podRole=instance
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            regex: metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+            target_label: cluster
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+
     remote_write:
       - url: http://100.96.199.122:9090/api/v1/write
+        # KT VM 메모리(2GB) 보호: 규칙·대시보드에 쓰는 지표만 전송
+        write_relabel_configs:
+          - source_labels: [__name__]
+            regex: "up|http_request_duration_seconds_(bucket|count|sum)|coupon_issue_total|kube_pod_status_ready|kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|kube_deployment_spec_replicas|node_cpu_seconds_total|node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|cnpg_.*"
+            action: keep
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: prometheus-agent
   namespace: monitoring
+  labels:
+    app: prometheus-agent
 spec:
   selector:
     matchLabels:
@@ -42,23 +157,40 @@ spec:
       labels:
         app: prometheus-agent
     spec:
-      automountServiceAccountToken: false   # 쿠버네티스 API를 쓰지 않음
+      serviceAccountName: prometheus-agent
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
         fsGroup: 65534
-      containers:
-        - name: prometheus
-          image: prom/prometheus:v3.13.5      # LTS (2027-07까지 지원)
-          args:
-            - --agent
-            - --config.file=/etc/prometheus/prometheus.yml
-            - --storage.agent.path=/prometheus
+      # 설정 파일의 __NODE_NAME__ 을 이 Pod가 뜬 노드 이름으로 바꿔서 저장
+      initContainers:
+        - name: render-config
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - sed "s/__NODE_NAME__/${NODE_NAME}/g" /tmpl/prometheus.yml.tmpl > /config/prometheus.yml
           env:
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: config-template
+              mountPath: /tmpl
+            - name: config
+              mountPath: /config
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.13.5   # LTS (2027-07까지 지원)
+          args:
+            - --agent
+            - --config.file=/config/prometheus.yml
+            - --storage.agent.path=/prometheus
+            - --web.listen-address=:9090
           ports:
             - name: http
               containerPort: 9090
@@ -67,22 +199,21 @@ spec:
               path: /-/ready
               port: http
           resources:
-            requests:
-              cpu: 50m
-              memory: 128Mi
-            limits:
-              memory: 256Mi
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 256Mi}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
           volumeMounts:
             - name: config
-              mountPath: /etc/prometheus
+              mountPath: /config
             - name: data
               mountPath: /prometheus
       volumes:
-        - name: config
+        - name: config-template
           configMap:
             name: prometheus-agent-config
+        - name: config
+          emptyDir: {}
         - name: data
-          emptyDir: {}   # 전송 대기 데이터(WAL). 파드가 재시작되면 비워짐
+          emptyDir: {}
