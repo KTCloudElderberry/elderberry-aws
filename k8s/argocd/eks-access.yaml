@@ -1,0 +1,73 @@
+# KT Argo CD가 EKS에 쿠폰 앱을 배포할 수 있게 하는 출입증 (B-9)
+# 권한: 읽기는 클러스터 전체, 쓰기는 coupon 네임스페이스만
+#   → 무엇을 배포할지는 Argo CD Application(elderberry-gitops/argocd/coupon-aws.yaml)이 정함
+#   → 주의: 이 토큰으로 클러스터의 모든 Secret을 읽을 수 있음. 토큰은 DM으로만 전달하고 KT VM 밖에 두지 않기
+# 토큰은 쿠버네티스가 아래 Secret에 자동으로 채움 → 이 파일에는 비밀값 없음
+# KT Argo CD 등록 이름: aws (coupon-aws.yaml의 destination.name)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-manager
+  namespace: kube-system
+---
+# 만료 없는 토큰 (Argo CD가 계속 접속해야 함). 노출되면 이 Secret을 지웠다 다시 만들면 새 토큰이 나옴
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-manager-token
+  namespace: kube-system
+  annotations:
+    kubernetes.io/service-account.name: argocd-manager
+type: kubernetes.io/service-account-token
+---
+# 읽기: 클러스터 전체 / 쓰기: coupon Namespace 객체 하나만 (namespace.yaml 적용용)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-manager-read
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["coupon"]
+    verbs: ["patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-manager-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argocd-manager-read
+subjects:
+  - kind: ServiceAccount
+    name: argocd-manager
+    namespace: kube-system
+---
+# coupon 네임스페이스 안: 쿠폰 앱 리소스 전부 관리
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-manager
+  namespace: coupon
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-manager
+  namespace: coupon
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-manager
+subjects:
+  - kind: ServiceAccount
+    name: argocd-manager
+    namespace: kube-system
