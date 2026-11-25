@@ -1,0 +1,53 @@
+# Karpenter가 띄울 노드의 AWS 설정 (어떤 서브넷·보안 그룹·AMI·IAM 역할을 쓸지)
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  role: elderberry-karpenter-node          # Terraform karpenter_node_role_name 출력값
+  amiSelectorTerms:
+    - alias: al2023@latest                 # 관리형 노드와 같은 Amazon Linux 2023 EKS AMI
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: elderberry-eks   # 프라이빗 서브넷 a·c (오늘 태그 추가)
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: elderberry-eks   # 관리형 노드와 같은 보안 그룹
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 20Gi
+        volumeType: gp3
+        encrypted: true                    # 루트 디스크 암호화 (다른 EBS와 통일)
+---
+# 노드를 언제, 무엇으로, 얼마나 띄울지
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: overflow
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+      requirements:
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]                # 쿠폰 앱 이미지가 x86용
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]            # 시연 중 회수되지 않게 스팟 대신 온디맨드
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values: ["ap-northeast-2a", "ap-northeast-2c"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["m7i-flex.large", "m7i.large", "c7i.large"]  # 2a·2c 모두 지원 확인된 타입
+      expireAfter: 24h                     # 노드를 하루 넘게 두지 않음
+  limits:
+    cpu: "4"                               # Karpenter 노드는 최대 vCPU 4개 (2 vCPU 노드 2대)
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m                   # 비거나 덜 쓰이면 1분 뒤 정리
