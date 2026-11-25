@@ -64,10 +64,18 @@ module "eks" {
         service_account = "ebs-csi-controller-sa"
       }]
     }
+
+    # Pod CPU·메모리 사용량 수집 (HPA가 이 값을 보고 Pod 수를 조절)
+    metrics-server = {}
   }
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets # 노드는 프라이빗 서브넷 a·c
+
+  # Karpenter 노드도 관리형 노드와 같은 보안 그룹을 쓰도록 표시
+  node_security_group_tags = {
+    "karpenter.sh/discovery" = "${local.name}-eks"
+  }
 
   eks_managed_node_groups = {
     default = {

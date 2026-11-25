@@ -22,3 +22,13 @@ output "eks_cluster_name" {
   description = "EKS 클러스터 이름 (kubeconfig 설정용)"
   value       = module.eks.cluster_name
 }
+
+output "karpenter_queue_name" {
+  description = "Karpenter interruption queue name (Helm settings.interruptionQueue)"
+  value       = module.karpenter.queue_name
+}
+
+output "karpenter_node_role_name" {
+  description = "Karpenter node IAM role name (EC2NodeClass spec.role)"
+  value       = module.karpenter.node_iam_role_name
+}
