@@ -19,6 +19,8 @@ module "vpc" {
   }
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = "1"
+    # Karpenter가 노드를 띄울 서브넷을 찾는 표시 (값 = EKS 클러스터 이름)
+    "karpenter.sh/discovery" = "${local.name}-eks"
   }
 }
 
