@@ -14,6 +14,9 @@ module "karpenter" {
   namespace                       = "kube-system"
   service_account                 = "karpenter"
 
+  # 컨트롤러 정책이 일반 IAM 정책 크기 제한(6,144자)을 넘어서 인라인 정책(10,240자)으로 만듦
+  enable_inline_policy = true
+
   # 노드 역할 이름 고정 (NodePool 매니페스트의 EC2NodeClass에서 이 이름을 씀)
   node_iam_role_use_name_prefix = false
   node_iam_role_name            = "${local.name}-karpenter-node"
