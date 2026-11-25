@@ -6,6 +6,7 @@ set -euo pipefail
 
 CLUSTER_NAME="elderberry-eks"
 REGION="ap-northeast-2"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "[1/5] 노드 그룹 2대로"
 NODEGROUP=$(aws eks list-nodegroups --cluster-name "$CLUSTER_NAME" --region "$REGION" --query "nodegroups[0]" --output text)
@@ -31,6 +32,10 @@ kubectl get nodes -L topology.kubernetes.io/zone
 echo "[3/5] CNPG 오퍼레이터·Barman 플러그인 준비 대기 (동면 해제 요청을 받을 웹훅)"
 kubectl -n cnpg-system rollout status deploy/cnpg-cloudnative-pg --timeout=5m
 kubectl -n cnpg-system rollout status deploy/plugin-barman-cloud --timeout=5m
+
+echo "[3-1/5] Karpenter 준비 + NodePool 다시 적용 (night-stop에서 지웠음)"
+kubectl -n kube-system rollout status deploy/karpenter --timeout=5m
+kubectl apply -f "$REPO_DIR/k8s/karpenter/nodepool.yaml"
 
 echo "[4/5] DB 동면 해제"
 # 웹훅이 막 준비된 직후에는 한두 번 거부될 수 있어서 다시 시도 (최대 1분)

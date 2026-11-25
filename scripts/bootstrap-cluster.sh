@@ -23,6 +23,7 @@ TAILSCALE_OPERATOR_CHART_VERSION="1.104.7"    # 2026-11-23 확인
 LBC_CHART_VERSION="3.6.3"                     # 2026-11-24 확인
 NODE_EXPORTER_CHART_VERSION="6.0.0"           # 2026-11-23 확인
 KSM_CHART_VERSION="9.1.0"                     # 2026-11-23 확인
+KARPENTER_CHART_VERSION="1.15.1"              # 2026-11-26 확인 (EKS 1.36은 1.13 이상 필요)
 
 # 이 스크립트가 어디서 실행돼도 저장소 기준 경로를 찾게 함
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -62,6 +63,16 @@ helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-contro
   --set serviceAccount.name=aws-load-balancer-controller \
   --set region="$REGION" \
   --set vpcId="$VPC_ID" --wait
+
+echo "[5-1/10] Karpenter (권한·큐는 daily/karpenter.tf) + NodePool"
+# 큐 이름은 Terraform 모듈 기본 규칙: Karpenter-<클러스터 이름>
+helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter \
+  --version "$KARPENTER_CHART_VERSION" \
+  --namespace kube-system \
+  --set settings.clusterName="$CLUSTER_NAME" \
+  --set settings.interruptionQueue="Karpenter-$CLUSTER_NAME" \
+  --set serviceAccount.name=karpenter --wait
+kubectl apply -f "$REPO_DIR/k8s/karpenter/nodepool.yaml"  
 
 echo "[6/10] Tailscale 오퍼레이터 (이미 있으면 건너뜀)"
 if helm status tailscale-operator -n tailscale >/dev/null 2>&1; then
