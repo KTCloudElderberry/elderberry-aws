@@ -1,0 +1,22 @@
+# Descheduler: HPA가 Pod를 줄인 뒤 AZ에 치우친 쿠폰 Pod를 다시 나눔
+# 범위: coupon 네임스페이스의 AZ 분산 위반만 (DB·시스템 Pod는 대상 아님)
+kind: CronJob
+schedule: "*/2 * * * *"        # 2분마다 한 번 실행
+
+deschedulerPolicy:
+  profiles:
+    - name: coupon-zone-spread
+      pluginConfig:
+        - name: DefaultEvictor
+          args: {}
+        - name: RemovePodsViolatingTopologySpreadConstraint
+          args:
+            constraints:
+              - DoNotSchedule   # 쿠폰 앱의 AZ 분산 규칙 종류
+            namespaces:
+              include:
+                - coupon
+      plugins:
+        balance:
+          enabled:
+            - RemovePodsViolatingTopologySpreadConstraint
