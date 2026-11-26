@@ -32,3 +32,13 @@ output "karpenter_node_role_name" {
   description = "Karpenter node IAM role name (EC2NodeClass spec.role)"
   value       = module.karpenter.node_iam_role_name
 }
+
+output "fis_az_a_outage_template_id" {
+  description = "FIS template ID: AZ a outage (5 min)"
+  value       = aws_fis_experiment_template.az_a_outage.id
+}
+
+output "fis_site_outage_template_id" {
+  description = "FIS template ID: AWS site outage (10 min)"
+  value       = aws_fis_experiment_template.site_outage.id
+}
