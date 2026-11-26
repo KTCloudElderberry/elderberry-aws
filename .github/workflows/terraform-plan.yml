@@ -36,6 +36,7 @@ jobs:
 
     env:
       TF_VAR_eks_public_access_cidrs: ${{ secrets.EKS_PUBLIC_ACCESS_CIDRS }}
+      TF_VAR_recovery_engine_source_cidrs: ${{ secrets.RECOVERY_ENGINE_SOURCE_CIDRS }}
       
     strategy:
       fail-fast: false
