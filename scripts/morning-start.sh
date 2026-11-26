@@ -7,6 +7,24 @@ set -euo pipefail
 CLUSTER_NAME="elderberry-eks"
 REGION="ap-northeast-2"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ONPREM_STATUS_URL="https://onprem.elderberry-coupon.com/api/coupons/status"
+
+echo "[0/5] 사이트 전환 상태 확인 (온프렘이 Primary면 AWS를 켜지 않음 → split-brain 방지)"
+if [ "${FORCE_START:-0}" = "1" ]; then
+  echo "  FORCE_START=1 → 검사 건너뜀 (복귀 절차 중에만 사용)"
+else
+  ONPREM=$(curl -s --max-time 10 "$ONPREM_STATUS_URL" || true)
+  if echo "$ONPREM" | grep -q '"db_role":"primary"'; then
+    echo "중지: 온프렘 DB가 Primary입니다 (사이트 전환 상태)." >&2
+    echo "  지금 AWS를 켜면 Primary가 2개가 됩니다. 복귀(failback) 절차를 따르세요." >&2
+    echo "  복귀 절차 중이라면: FORCE_START=1 bash scripts/morning-start.sh" >&2
+    exit 1
+  elif [ -z "$ONPREM" ]; then
+    echo "  경고: 온프렘 상태 응답 없음 → 전환 여부를 확인할 수 없어 계속 진행"
+  else
+    echo "  온프렘은 Replica → 평소 상태, 계속 진행"
+  fi
+fi
 
 echo "[1/5] 노드 그룹 2대로"
 NODEGROUP=$(aws eks list-nodegroups --cluster-name "$CLUSTER_NAME" --region "$REGION" --query "nodegroups[0]" --output text)
