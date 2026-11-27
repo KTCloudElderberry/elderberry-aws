@@ -7,7 +7,8 @@ variable "eks_public_access_cidrs" {
 # ── 클러스터 관리자 (내 IAM 사용자) ──
 # 계정 ID는 코드에 적지 않고 조회해서 씀 (공개 저장소)
 locals {
-  cluster_admin_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/elderberry-taehyeon-admin"
+  cluster_admin_arn   = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/elderberry-taehyeon-admin"
+  recovery_engine_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/elderberry-recovery-engine"
 }
 
 # ── EKS 클러스터 + 노드 그룹 ──
@@ -40,6 +41,12 @@ module "eks" {
           }
         }
       }
+    }
+    # 복구 엔진(KT Control VM): 쿠버네티스 그룹만 붙이고 AWS 기본 정책은 연결하지 않음
+    # 실제 권한은 k8s/recovery-engine/rbac.yaml (조회만)
+    recovery_engine = {
+      principal_arn     = local.recovery_engine_arn
+      kubernetes_groups = ["recovery-engine"]
     }
   }
 
