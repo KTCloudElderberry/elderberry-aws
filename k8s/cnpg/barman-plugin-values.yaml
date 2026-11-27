@@ -1,0 +1,12 @@
+# Barman Cloud 플러그인 고가용성 (11/27 FIS AZ a 실험)
+# 오퍼레이터는 플러그인에 닿지 못하면 조정을 멈춤 → 플러그인도 AZ마다 하나씩
+replicaCount: 2
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    matchLabelKeys:
+      - pod-template-hash
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: plugin-barman-cloud
