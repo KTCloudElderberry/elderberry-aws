@@ -1,0 +1,13 @@
+# CNPG 오퍼레이터 고가용성 (11/27 FIS AZ a 실험에서 단일 장애점 발견)
+# 2개를 AZ마다 하나씩 → 한 AZ가 끊겨도 다른 AZ의 오퍼레이터가 리더를 이어받아
+# 끊긴 replica를 동기 복제 대상에서 빼 줌 (dataDurability: preferred가 동작하는 조건)
+replicaCount: 2
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    matchLabelKeys:
+      - pod-template-hash
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: cloudnative-pg

@@ -48,10 +48,10 @@ helm upgrade --install cert-manager jetstack/cert-manager \
 echo "[4/10] CNPG 오퍼레이터 + Barman Cloud 플러그인"
 helm upgrade --install cnpg cnpg/cloudnative-pg \
   --version "$CNPG_CHART_VERSION" \
-  --namespace cnpg-system --create-namespace --wait
+  --namespace cnpg-system --create-namespace -f "$REPO_DIR/k8s/cnpg/operator-values.yaml" --wait
 helm upgrade --install plugin-barman-cloud cnpg/plugin-barman-cloud \
   --version "$BARMAN_PLUGIN_CHART_VERSION" \
-  --namespace cnpg-system --wait
+  --namespace cnpg-system -f "$REPO_DIR/k8s/cnpg/barman-plugin-values.yaml" --wait
 kubectl -n cnpg-system rollout status deploy/plugin-barman-cloud
 
 echo "[5/10] AWS Load Balancer Controller (권한은 daily/eks.tf의 Pod Identity)"
