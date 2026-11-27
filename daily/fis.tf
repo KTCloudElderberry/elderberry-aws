@@ -100,3 +100,19 @@ resource "aws_fis_experiment_template" "site_outage" {
     Name = "${local.name}-site-outage"
   }
 }
+
+# FIS가 대상(서브넷)을 찾을 때 쓰는 태그 조회 권한
+# 관리형 NetworkAccess 정책에 없어서 실험이 "Error resolving targets"로 실패함 (11/27)
+resource "aws_iam_role_policy" "fis_resolve_targets" {
+  name = "resolve-targets"
+  role = aws_iam_role.fis.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["tag:GetResources"]
+      Resource = "*"
+    }]
+  })
+}
