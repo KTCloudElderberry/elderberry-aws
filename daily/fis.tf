@@ -168,3 +168,39 @@ resource "aws_fis_experiment_template" "az_a_node_loss" {
     }
   }
 }
+
+# AZ c 노드 전원 손실: primary DB가 있는 AZ를 꺼서 승격·failback을 확인하는 실험
+resource "aws_fis_experiment_template" "az_c_node_loss" {
+  description = "AZ c node power loss: force-terminate EKS nodes in ap-northeast-2c (node group replaces them)"
+  role_arn    = aws_iam_role.fis.arn
+  stop_condition { source = "none" }
+  action {
+    name      = "terminate-az-c-nodes"
+    action_id = "aws:ec2:terminate-instances"
+    parameter {
+      key   = "skipOsShutdown"
+      value = "true"
+    }
+    target {
+      key   = "Instances"
+      value = "az-c-nodes"
+    }
+  }
+  target {
+    name           = "az-c-nodes"
+    resource_type  = "aws:ec2:instance"
+    selection_mode = "ALL"
+    resource_tag {
+      key   = "eks:cluster-name"
+      value = module.eks.cluster_name
+    }
+    filter {
+      path   = "Placement.AvailabilityZone"
+      values = ["ap-northeast-2c"]
+    }
+    filter {
+      path   = "State.Name"
+      values = ["running"]
+    }
+  }
+}
