@@ -141,6 +141,8 @@ else
 fi
 # KT Argo CD 출입증 (읽기 전체, 쓰기 coupon만)
 kubectl apply -f "$REPO_DIR/k8s/argocd/eks-access.yaml"
+# 복구 엔진 조회 권한 (Access Entry 그룹 recovery-engine → Node·Pod·coupon-db 조회만)
+kubectl apply -f "$REPO_DIR/k8s/recovery-engine/rbac.yaml"
 
 # 쿠폰 앱이 없으면 = 새 클러스터 → EKS 주소·CA·토큰이 바뀌어 Argo CD 등록을 다시 해야 함
 if kubectl get deploy coupon -n coupon >/dev/null 2>&1; then
