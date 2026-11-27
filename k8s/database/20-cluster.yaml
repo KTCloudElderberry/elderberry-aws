@@ -40,6 +40,25 @@ spec:
       number: 1
       dataDurability: preferred
 
+  # 복구 엔진용 DB 계정 (비밀번호는 Secret recovery-monitor / recovery-writer, Git에 없음)
+  # monitor: 상태·복제·System Identifier 조회 / writer: recovery_check.write_probe SELECT·INSERT만
+  managed:
+    roles:
+      - name: recovery_monitor
+        ensure: present
+        login: true
+        connectionLimit: 5
+        inRoles:
+          - pg_monitor
+        passwordSecret:
+          name: recovery-monitor
+      - name: recovery_writer
+        ensure: present
+        login: true
+        connectionLimit: 5
+        passwordSecret:
+          name: recovery-writer
+
   resources:
     requests:
       cpu: 250m
