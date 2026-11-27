@@ -1,0 +1,54 @@
+# 복구 엔진(KT Control VM)용 쿠버네티스 권한 — 조회만
+# 연결: daily/eks.tf의 Access Entry(recovery_engine) → 그룹 recovery-engine
+# 허용: Node get/list, database 네임스페이스의 Pod get/list, CNPG Cluster coupon-db get
+# 없음: 수정·삭제, exec/logs, Secret 조회
+# fencing(노드 그룹 0)은 쿠버네티스가 아니라 AWS IAM(global/recovery-engine.tf)으로 함
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: recovery-engine-nodes
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: recovery-engine-nodes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: recovery-engine-nodes
+subjects:
+  - kind: Group
+    name: recovery-engine
+    apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: recovery-engine-read
+  namespace: database
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: ["coupon-db"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: recovery-engine-read
+  namespace: database
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: recovery-engine-read
+subjects:
+  - kind: Group
+    name: recovery-engine
+    apiGroup: rbac.authorization.k8s.io
